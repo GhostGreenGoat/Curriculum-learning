@@ -20,7 +20,11 @@ from types import SimpleNamespace
 from typing import Optional
 
 import torch
-from transformers.modeling_flash_attention_utils import _flash_attention_forward
+try:
+    from transformers.modeling_flash_attention_utils import _flash_attention_forward
+except (ImportError, ModuleNotFoundError):
+    # transformers < 4.42.0 doesn't have this module
+    _flash_attention_forward = None
 from transformers.modeling_utils import PreTrainedModel
 
 from verl.utils.import_utils import is_trl_available
@@ -485,9 +489,11 @@ def apply_monkey_patch(
             module._flash_attention_forward = _ulysses_flash_attention_forward
             print(f"Monkey patch _flash_attention_forward in {model.__module__}")
         else:
-            from transformers.integrations import flash_attention
-
-            flash_attention._flash_attention_forward = _ulysses_flash_attention_forward
-            print(f"Monkey patch _flash_attention_forward in {flash_attention.__name__}")
+            try:
+                from transformers.integrations import flash_attention
+                flash_attention._flash_attention_forward = _ulysses_flash_attention_forward
+                print(f"Monkey patch _flash_attention_forward in {flash_attention.__name__}")
+            except (ImportError, AttributeError):
+                print("Warning: Cannot import flash_attention from transformers.integrations, skipping monkey patch")
 
     patch_forward_with_backends(model, use_fused_kernels=use_fused_kernels, fused_kernels_backend=fused_kernels_backend)

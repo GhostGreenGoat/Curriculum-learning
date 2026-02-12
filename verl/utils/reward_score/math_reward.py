@@ -16,16 +16,39 @@
 
 def compute_score(solution_str, ground_truth) -> float:
     retval = 0.0
+    extracted_answer = None
     try:
         string_in_last_boxed = last_boxed_only_string(solution_str)
         if string_in_last_boxed is not None:
             answer = remove_boxed(string_in_last_boxed)
-            if is_equiv(answer, ground_truth):
+            extracted_answer = answer
+        else:
+            # Fallback: attempt to extract answer using regex if \boxed{} is missing
+            import re
+            pattern = r"(?i)(?:the answer is|answer is|answer:|therefore,?|thus,?)\s*[:=]?\s*\$?([^\n\$]+?)\$?(?:\.|$|\n)"
+            matches = re.findall(pattern, solution_str)
+            if matches:
+                extracted_answer = matches[-1].strip()
+                if extracted_answer.endswith(".") and not extracted_answer.replace(".", "").isdigit():
+                     extracted_answer = extracted_answer[:-1]
+
+        # Extract answer from ground_truth if it contains \boxed
+        ground_truth_answer = ground_truth
+        if isinstance(ground_truth, str) and ("\\boxed" in ground_truth or "\\fbox" in ground_truth):
+            gt_boxed = last_boxed_only_string(ground_truth)
+            if gt_boxed is not None:
+                ground_truth_answer = remove_boxed(gt_boxed)
+
+        if extracted_answer is not None:
+            if is_equiv(extracted_answer, ground_truth_answer):
                 retval = 1.0
     except Exception as e:
         print(e)
 
-    return retval
+    return {
+        "score": retval,
+        "extracted_answer": extracted_answer
+    }
 
 
 # string normalization from https://github.com/EleutherAI/lm-evaluation-harness/blob/master/lm_eval/tasks/hendrycks_math.py
@@ -53,6 +76,12 @@ def remove_boxed(s):
         return s[len(left) :]
 
     left = "\\boxed{"
+    
+    if s.startswith(left):
+        return s[len(left) : -1]
+        
+    if s.startswith("\\boxed {"):
+        return s[len("\\boxed {") : -1]
 
     assert s[: len(left)] == left
     assert s[-1] == "}"

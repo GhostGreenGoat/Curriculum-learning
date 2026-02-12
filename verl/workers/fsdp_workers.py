@@ -36,7 +36,6 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import FullStateDictConfig, ShardedStateDictConfig, StateDictType
 
 try:
-    # for torch 2.5+
     from torch.distributed.tensor import DTensor
 except ImportError:
     from torch.distributed._tensor import DTensor
@@ -294,9 +293,18 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             AutoConfig,
             AutoModel,
             AutoModelForCausalLM,
-            AutoModelForImageTextToText,
-            AutoModelForVision2Seq,
         )
+        
+        # Optional imports for multimodal models
+        try:
+            from transformers import AutoModelForImageTextToText
+        except ImportError:
+            AutoModelForImageTextToText = None
+        
+        try:
+            from transformers import AutoModelForVision2Seq
+        except ImportError:
+            AutoModelForVision2Seq = None
 
         from verl.utils.model import get_generation_config, print_model_size, update_model_config
         from verl.utils.torch_dtypes import PrecisionType
@@ -394,11 +402,11 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                     case _:
                         actor_module_class = AutoModel
             else:
-                if type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
+                if AutoModelForVision2Seq is not None and type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
                     actor_module_class = AutoModelForVision2Seq
                 elif type(actor_model_config) in AutoModelForCausalLM._model_mapping.keys():
                     actor_module_class = AutoModelForCausalLM
-                elif type(actor_model_config) in AutoModelForImageTextToText._model_mapping.keys():
+                elif AutoModelForImageTextToText is not None and type(actor_model_config) in AutoModelForImageTextToText._model_mapping.keys():
                     actor_module_class = AutoModelForImageTextToText
                 else:
                     actor_module_class = AutoModel

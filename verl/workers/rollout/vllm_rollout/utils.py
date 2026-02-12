@@ -210,6 +210,7 @@ class vLLMColocateWorkerExtension:
         while True:
             metadata = socket.recv_pyobj()
             weights, tensor = [], None
+
             for name, meta in metadata["bucket_meta"].items():
                 shape, dtype, offset = meta["shape"], meta["dtype"], meta["offset"]
                 size = dtype.itemsize * shape.numel()
