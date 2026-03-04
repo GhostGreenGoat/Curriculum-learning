@@ -129,3 +129,5 @@ log
 outputs
 .history
 rollout_data/
+rollout_data_hard_pool/
+rollout_data_vanilla_grpo/

@@ -31,6 +31,7 @@ import ray
 import torch
 from omegaconf import OmegaConf, open_dict
 from torch.utils.data import Dataset, Sampler
+from torch.utils.data.distributed import DistributedSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm import tqdm
 
@@ -395,6 +396,19 @@ class RayPPOTrainer:
 
     def _dump_generations(self, inputs, outputs, gts, scores, reward_extra_infos_dict, dump_path):
         """Dump rollout/validation samples as JSONL."""
+
+        def _to_json_serializable(obj):
+            """Convert numpy types to Python natives for JSON serialization."""
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+            if isinstance(obj, (np.integer, np.int64, np.int32)):
+                return int(obj)
+            if isinstance(obj, (np.floating, np.float64, np.float32)):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return obj
+
         os.makedirs(dump_path, exist_ok=True)
         filename = os.path.join(dump_path, f"{self.global_steps}.jsonl")
 
@@ -413,7 +427,7 @@ class RayPPOTrainer:
 
         lines = []
         for i in range(n):
-            entry = {k: v[i] for k, v in base_data.items()}
+            entry = {k: _to_json_serializable(v[i]) for k, v in base_data.items()}
             lines.append(json.dumps(entry, ensure_ascii=False))
 
         with open(filename, "w") as f:
@@ -968,6 +982,12 @@ class RayPPOTrainer:
         local_mkdir_safe(local_global_step_folder)
         dataloader_local_path = os.path.join(local_global_step_folder, "data.pt")
         dataloader_state_dict = self.train_dataloader.state_dict()
+        
+        # Explicitly save sampler state if it has state_dict
+        if hasattr(self.train_dataloader.sampler, 'state_dict'):
+             sampler_state = self.train_dataloader.sampler.state_dict()
+             dataloader_state_dict['_custom_sampler_state'] = sampler_state
+             
         torch.save(dataloader_state_dict, dataloader_local_path)
 
         # latest checkpointed iteration tracker (for atomic usage)
@@ -1040,6 +1060,11 @@ class RayPPOTrainer:
         if os.path.exists(dataloader_local_path):
             dataloader_state_dict = torch.load(dataloader_local_path, weights_only=False)
             self.train_dataloader.load_state_dict(dataloader_state_dict)
+            
+            # Restore custom sampler state
+            if '_custom_sampler_state' in dataloader_state_dict and hasattr(self.train_dataloader.sampler, 'load_state_dict'):
+                print("Restoring custom sampler state...")
+                self.train_dataloader.sampler.load_state_dict(dataloader_state_dict['_custom_sampler_state'])
         else:
             print(f"Warning: No dataloader state found at {dataloader_local_path}, will start from scratch")
 
@@ -1348,6 +1373,11 @@ class RayPPOTrainer:
         next_step_profile = False
 
         for epoch in range(current_epoch, self.config.trainer.total_epochs):
+            if hasattr(self.train_dataloader.sampler, "set_epoch"):
+                self.train_dataloader.sampler.set_epoch(epoch)
+            elif isinstance(self.train_dataloader.sampler, DistributedSampler):
+                self.train_dataloader.sampler.set_epoch(epoch)
+                
             for batch_dict in self.train_dataloader:
                 if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
                     self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=False)
@@ -1681,7 +1711,9 @@ class RayPPOTrainer:
 
                 # this is experimental and may be changed/removed in the future in favor of a general-purpose one
                 if isinstance(self.train_dataloader.sampler, AbstractCurriculumSampler):
-                    self.train_dataloader.sampler.update(batch=batch)
+                    sampler_metrics = self.train_dataloader.sampler.update(batch=batch)
+                    if sampler_metrics and isinstance(sampler_metrics, dict):
+                        metrics.update(sampler_metrics)
 
                 # TODO: make a canonical logger that supports various backend
                 logger.log(data=metrics, step=self.global_steps)

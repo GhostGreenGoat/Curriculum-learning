@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -x
 
-# Vanilla GRPO - Qwen2.5-Math-1.5B (base) on DeepScaleR, eval on MATH-500
+# GRPO + Hard Pool - Qwen2.5-Math-1.5B (base) on DeepScaleR, eval on MATH-500
 # 训练: DeepScaleR | 验证: MATH-500 | 使用 grad acc 增大 effective batch size
 
 MODEL_PATH="/home/ubuntu/date/models/Qwen2.5-Math-1.5B"
@@ -9,7 +9,6 @@ TRAIN_DATA="/home/ubuntu/date/data/deepscaler/train.parquet"
 VAL_DATA="/home/ubuntu/date/data/math500/math500_full.parquet"
 
 # Batch size: 24GB 显存需保守配置，避免 ref_log_prob 时 OOM
-# TRAIN_BATCH_SIZE: prompts per step
 N_GPUS=4
 ROLLOUT_N=8
 TRAIN_BATCH_SIZE=32
@@ -24,8 +23,8 @@ if (( (TRAIN_BATCH_SIZE * ROLLOUT_N) % N_GPUS != 0 )); then
   exit 1
 fi
 
-export WANDB_PROJECT="grpo_deepscaler_math500_vanilla"
-export WANDB_EXP="exp_$(date +%Y%m%d_%H%M)"
+export WANDB_PROJECT="grpo_deepscaler_math500_hard_pool"
+export WANDB_EXP="exp_hard_pool_$(date +%Y%m%d_%H%M)"
 
 /home/ubuntu/date/conda_env_backup/verl/bin/python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -35,9 +34,13 @@ export WANDB_EXP="exp_$(date +%Y%m%d_%H%M)"
     data.val_batch_size=$VAL_BATCH_SIZE \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
+    +data.hard_pool.enable=True \
+    +data.hard_pool.max_hard_ratio=0.5 \
+    +data.hard_pool.max_consecutive_steps=30 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.shuffle=False \
+    data.dataloader_num_workers=0 \
     actor_rollout_ref.model.path=$MODEL_PATH \
     actor_rollout_ref.model.use_remove_padding=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
@@ -74,7 +77,7 @@ export WANDB_EXP="exp_$(date +%Y%m%d_%H%M)"
     trainer.nnodes=1 \
     trainer.save_freq=630 \
     trainer.log_val_generations=0 \
-    trainer.rollout_data_dir=rollout_data \
+    trainer.rollout_data_dir=rollout_data_hard_pool \
     trainer.test_freq=630 \
     trainer.total_epochs=2 \
     trainer.val_before_train=True \

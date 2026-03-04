@@ -394,6 +394,12 @@ def create_rl_dataset(data_paths, data_config, tokenizer, processor, is_train=Tr
         max_samples=max_samples,
     )
 
+    # Wrap dataset if hard pool sampling is enabled
+    if is_train and data_config.get("hard_pool", {}).get("enable", False):
+        from verl.utils.dataset.hard_pool_sampler import HardPoolAwareDataset
+        print("Hard Pool Sampling enabled: Wrapping train dataset with HardPoolAwareDataset")
+        dataset = HardPoolAwareDataset(dataset)
+
     return dataset
 
 
@@ -412,6 +418,16 @@ def create_rl_sampler(data_config, dataset):
 
     # torch.utils.data.RandomSampler could not recover properly
     from torchdata.stateful_dataloader.sampler import RandomSampler
+
+    # Check for hard pool configuration first
+    if data_config.get("hard_pool", {}).get("enable", False):
+        from verl.utils.dataset.hard_pool_sampler import HardPoolSampler
+        print("Hard Pool Sampling enabled: Using HardPoolSampler")
+        sampler = HardPoolSampler(
+            data_source=dataset,
+            data_config=data_config,
+        )
+        return sampler
 
     if data_config.sampler is not None and data_config.sampler.get("class_path", None) is not None:
         curriculum_class = load_extern_object(

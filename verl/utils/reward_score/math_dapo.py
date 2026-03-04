@@ -262,7 +262,7 @@ def compute_score(
     # Verify the solution
     correct, pred = verify(solution_str, ground_truth, strict_box_verify, pause_tokens_index)
 
-    reward = 1.0 if correct else -1.0
+    reward = 1.0 if correct else 0.0  # classic GRPO: correct=1, wrong=0
     acc = correct
 
     return {

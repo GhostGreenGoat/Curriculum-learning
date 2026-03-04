@@ -13,6 +13,7 @@
 # limitations under the License.
 from abc import abstractmethod
 from collections.abc import Sized
+from typing import Dict, Any
 
 from omegaconf import DictConfig
 from torch.utils.data import Sampler
@@ -36,5 +37,9 @@ class AbstractCurriculumSampler(AbstractSampler):
     """Experimental interface for curriculum learning samplers."""
 
     @abstractmethod
-    def update(self, batch: DataProto) -> None:
+    def update(self, batch: DataProto) -> Dict[str, Any]:
+        """
+        Update the sampler state based on the training batch.
+        Returns a dictionary of metrics to be logged.
+        """
         pass
