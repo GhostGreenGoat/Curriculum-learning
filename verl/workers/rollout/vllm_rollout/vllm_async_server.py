@@ -27,7 +27,10 @@ from packaging import version
 from ray.actor import ActorHandle
 from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
-from vllm.entrypoints.cli.serve import run_headless
+try:
+    from vllm.entrypoints.cli.serve import run_headless
+except ImportError:
+    run_headless = None
 from vllm.entrypoints.openai.api_server import build_app, init_app_state
 from vllm.inputs import TokensPrompt
 from vllm.lora.request import LoRARequest
@@ -277,7 +280,6 @@ class vLLMHttpServer:
             "max_num_batched_tokens": self.config.max_num_batched_tokens,
             "enable_prefix_caching": self.config.enable_prefix_caching,
             "enable_sleep_mode": self.config.enable_sleep_mode,
-            "logprobs_mode": self.config.logprobs_mode,
             "enforce_eager": self.config.enforce_eager,
             "gpu_memory_utilization": self.config.gpu_memory_utilization,
             "disable_log_stats": self.config.disable_log_stats,
@@ -406,11 +408,12 @@ class vLLMHttpServer:
 
         engine_client = AsyncLLM.from_vllm_config(vllm_config=vllm_config, usage_context=usage_context, **kwargs)
 
-        # Don't keep the dummy data in memory
-        await engine_client.reset_mm_cache()
-        await engine_client.collective_rpc(
-            method="monkey_patch_model", kwargs={"vocab_size": len(self.model_config.tokenizer)}
-        )
+        if hasattr(engine_client, "reset_mm_cache"):
+            await engine_client.reset_mm_cache()
+        if hasattr(engine_client, "collective_rpc"):
+            await engine_client.collective_rpc(
+                method="monkey_patch_model", kwargs={"vocab_size": len(self.model_config.tokenizer)}
+            )
 
         build_app_sig = inspect.signature(build_app)
         supported_tasks: tuple[Any, ...] = ()
@@ -435,6 +438,11 @@ class vLLMHttpServer:
 
     async def run_headless(self, args: argparse.Namespace):
         """Run headless server in a separate thread."""
+        if run_headless is None:
+            raise ImportError(
+                "vllm.entrypoints.cli.serve.run_headless not available. "
+                "Multi-node mode requires vllm >= 0.9.0."
+            )
 
         def run_headless_wrapper():
             with SuppressSignalInThread():
@@ -500,7 +508,10 @@ class vLLMHttpServer:
         if video_data is not None:
             multi_modal_data["video"] = video_data
 
-        prompt = TokensPrompt(prompt_token_ids=prompt_ids, multi_modal_data=multi_modal_data)
+        prompt_kwargs = {"prompt_token_ids": prompt_ids}
+        if multi_modal_data:
+            prompt_kwargs["multi_modal_data"] = multi_modal_data
+        prompt = TokensPrompt(**prompt_kwargs)
 
         # Add lora request
         lora_request = None
@@ -613,7 +624,8 @@ class vLLMHttpServer:
             await self.engine.reset_prefix_cache()
 
     async def wait_for_requests_to_drain(self):
-        await self.engine.wait_for_requests_to_drain()
+        if hasattr(self.engine, "wait_for_requests_to_drain"):
+            await self.engine.wait_for_requests_to_drain()
 
     async def abort_all_requests(self, reset_prefix_cache: bool = True) -> dict[str, Any]:
         """Abort all ongoing generation requests.

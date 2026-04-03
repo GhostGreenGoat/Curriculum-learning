@@ -131,3 +131,16 @@ outputs
 rollout_data/
 rollout_data_hard_pool/
 rollout_data_vanilla_grpo/
+rollout_data_otm_*/
+
+# IDE
+.cursor/
+
+# Separate repos
+autoresearch/
+
+# Temporary scripts
+restart_*.sh
+
+# Personal files
+*.pdf

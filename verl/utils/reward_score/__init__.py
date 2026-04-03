@@ -49,28 +49,19 @@ def default_compute_score(
         from . import math_reward
 
         res = math_reward.compute_score(solution_str, ground_truth)
-        # [Optional] Math-Verify Integration
-        # For enhanced accuracy, consider utilizing Math-Verify (https://github.com/huggingface/Math-Verify).
-        # Note: Math-Verify needs to be manually installed via pip: `pip install math-verify`.
-        # To use it, override the `compute_score` function with the following implementation:
-
-        # from . import math_verify
-        # res = math_verify.compute_score(solution_str, ground_truth)
-    elif data_source in ["math_dapo", "math", "math_dapo_reasoning"] or data_source.startswith("aime"):
+    elif data_source in ["math_dapo", "math_dapo_reasoning"]:
         from . import math_dapo
 
         res = math_dapo.compute_score(solution_str, ground_truth)
-    elif data_source in [
-        "numina_aops_forum",
-        "numina_synthetic_math",
-        "numina_amc_aime",
-        "numina_synthetic_amc",
-        "numina_cn_k12",
-        "numina_olympiads",
-    ]:
-        from . import prime_math
+    elif (
+        data_source in ["math", "deepscaler", "math500", "amc"]
+        or data_source.startswith("aime")
+        or data_source.startswith("numina_")
+        or data_source in ["olympiads", "aops_forum", "amc_aime", "openthoughts_math"]
+    ):
+        from . import math_reward
 
-        res = prime_math.compute_score(solution_str, ground_truth)
+        res = math_reward.compute_score(solution_str, ground_truth)
     elif data_source in ["codecontests", "apps", "codeforces", "taco"]:
         # Use the passed sandbox_fusion_url if available
         if sandbox_fusion_url:
@@ -86,10 +77,10 @@ def default_compute_score(
 
             # Assuming prime_code doesn't need the URL
             res = prime_code.compute_score(solution_str, ground_truth, continuous=True)
-    elif data_source in ["hiyouga/geometry3k"]:
-        from . import geo3k
+    elif data_source in ["hiyouga/geometry3k", "geometry3k"]:
+        from . import math_reward
 
-        res = geo3k.compute_score(solution_str, ground_truth)
+        res = math_reward.compute_score(solution_str, ground_truth)
     elif data_source in [
         "searchR1_nq",
         "searchR1_triviaqa",

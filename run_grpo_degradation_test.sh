@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -x
 
-# Vanilla GRPO - Qwen2.5-Math-1.5B (base) on DeepScaleR
-# 验证: MATH-500, AIME, AMC, Numina, Geometry3k
+# 退化验证: Hard Pool 代码路径 + max_hard_ratio=0
+# 验证 HardPoolSampler 在不注入难题时行为等价于 vanilla GRPO
 # 硬件: A800 (80GB) x 8
 
 # ============== 路径配置 (根据实际环境修改) ==============
@@ -32,8 +32,8 @@ if (( (TRAIN_BATCH_SIZE * ROLLOUT_N) % N_GPUS != 0 )); then
   exit 1
 fi
 
-export WANDB_PROJECT="grpo_deepscaler_vanilla_a800"
-export WANDB_EXP="exp_vanilla_$(date +%Y%m%d_%H%M)"
+export WANDB_PROJECT="grpo_deepscaler_degradation_test"
+export WANDB_EXP="exp_degradation_$(date +%Y%m%d_%H%M)"
 
 VERL_PYTHON="/export/home/zhaolei/anaconda3/envs/verl/bin/python3"
 export VLLM_USE_V1=1
@@ -48,6 +48,9 @@ $VERL_PYTHON -m verl.trainer.main_ppo \
     data.val_batch_size=$VAL_BATCH_SIZE \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
+    +data.hard_pool.enable=True \
+    +data.hard_pool.max_hard_ratio=0 \
+    +data.hard_pool.max_consecutive_steps=30 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
     data.shuffle=False \
@@ -94,7 +97,7 @@ $VERL_PYTHON -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=100 \
     trainer.log_val_generations=0 \
-    trainer.rollout_data_dir=/export/home/zhaolei/laiminzhi/rollout_data \
+    trainer.rollout_data_dir=/export/home/zhaolei/laiminzhi/rollout_data_degradation \
     trainer.test_freq=50 \
     trainer.total_epochs=2 \
     trainer.val_before_train=True \

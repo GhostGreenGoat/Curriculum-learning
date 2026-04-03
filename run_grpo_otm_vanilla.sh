@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -x
 
-# Vanilla GRPO - Qwen2.5-Math-1.5B (base) on DeepScaleR
+ulimit -s unlimited 2>/dev/null
+export LD_PRELOAD=""
+unset ROCR_VISIBLE_DEVICES 2>/dev/null
+
+# 正式实验: Vanilla GRPO on OpenThoughts-Math (OTM)
+# 使用 HardPoolSampler 代码路径但 max_hard_ratio=0 (不注入难题)
 # 验证: MATH-500, AIME, AMC, Numina, Geometry3k
 # 硬件: A800 (80GB) x 8
 
-# ============== 路径配置 (根据实际环境修改) ==============
+# ============== 路径配置 ==============
 MODEL_PATH="/export/home/zhaolei/models/Qwen2.5-Math-1.5B"
-TRAIN_DATA="/export/home/zhaolei/laiminzhi/data/train/deepscaler/train.parquet"
+TRAIN_DATA="/export/home/zhaolei/laiminzhi/data/train/openthoughts_math/train.parquet"
 
-# 多验证集: MATH-500, AIME, AMC, Numina, Geometry3k
 VAL_MATH500="/export/home/zhaolei/laiminzhi/data/test/benchmarks/math500.parquet"
 VAL_AIME="/export/home/zhaolei/laiminzhi/data/test/benchmarks/aime.parquet"
 VAL_AMC="/export/home/zhaolei/laiminzhi/data/test/benchmarks/amc.parquet"
@@ -19,21 +23,20 @@ VAL_GEO3K="/export/home/zhaolei/laiminzhi/data/test/benchmarks/geometry3k.parque
 # ============== 训练超参 (A800 x 8) ==============
 N_GPUS=8
 ROLLOUT_N=8
-TRAIN_BATCH_SIZE=128               # 128 prompts/step (was 32 on 3090)
+TRAIN_BATCH_SIZE=128
 VAL_BATCH_SIZE=256
-PPO_MINI_BATCH_SIZE=64             # grad acc steps = 128*8 / (64) = 16
-PPO_MICRO_BATCH_SIZE_PER_GPU=4     # per-GPU micro batch (was 2)
+PPO_MINI_BATCH_SIZE=64
+PPO_MICRO_BATCH_SIZE_PER_GPU=4
 MAX_NUM_SEQS=256
 
 # ============== 验证 ==============
 if (( (TRAIN_BATCH_SIZE * ROLLOUT_N) % N_GPUS != 0 )); then
   echo "ERROR: train_batch_size * rollout_n must be divisible by N_GPUS"
-  echo "Got TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE}, ROLLOUT_N=${ROLLOUT_N}, N_GPUS=${N_GPUS}"
   exit 1
 fi
 
-export WANDB_PROJECT="grpo_deepscaler_vanilla_a800"
-export WANDB_EXP="exp_vanilla_$(date +%Y%m%d_%H%M)"
+export WANDB_PROJECT="grpo_otm_vanilla"
+export WANDB_EXP="${WANDB_EXP:-otm_vanilla_$(date +%Y%m%d_%H%M)}"
 
 VERL_PYTHON="/export/home/zhaolei/anaconda3/envs/verl/bin/python3"
 export VLLM_USE_V1=1
@@ -48,9 +51,12 @@ $VERL_PYTHON -m verl.trainer.main_ppo \
     data.val_batch_size=$VAL_BATCH_SIZE \
     data.max_prompt_length=1024 \
     data.max_response_length=2048 \
+    +data.hard_pool.enable=True \
+    +data.hard_pool.max_hard_ratio=0 \
+    +data.hard_pool.max_consecutive_steps=30 \
     data.filter_overlong_prompts=True \
     data.truncation='error' \
-    data.shuffle=False \
+    data.shuffle=True \
     data.seed=42 \
     data.dataloader_num_workers=0 \
     actor_rollout_ref.model.path=$MODEL_PATH \
@@ -94,7 +100,7 @@ $VERL_PYTHON -m verl.trainer.main_ppo \
     trainer.nnodes=1 \
     trainer.save_freq=100 \
     trainer.log_val_generations=0 \
-    trainer.rollout_data_dir=/export/home/zhaolei/laiminzhi/rollout_data \
+    trainer.rollout_data_dir=/export/home/zhaolei/laiminzhi/rollout_data_otm_vanilla \
     trainer.test_freq=50 \
     trainer.total_epochs=2 \
     trainer.val_before_train=True \

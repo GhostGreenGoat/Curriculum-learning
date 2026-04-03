@@ -417,6 +417,100 @@ def compute_variance_proxy_metrics(batch: DataProto, gradient_norm: float = None
     return metrics
 
 
+def compute_effective_data_metrics(batch: DataProto, rollout_n: int) -> dict[str, Any]:
+    """
+    Compute metrics about effective training data per step.
+
+    Effective data: prompts where rollout results are mixed (neither all-correct nor all-wrong).
+    These are the only prompts that produce non-zero GRPO gradients.
+
+    Returns metrics split by source (hard_pool vs normal) when from_hard_pool info is available.
+    """
+    scores = batch.batch["token_level_scores"].sum(-1)
+    is_correct = (scores > 0).cpu().numpy()
+
+    total_samples = len(is_correct)
+    n_prompts = total_samples // rollout_n
+    if n_prompts == 0 or rollout_n == 0:
+        return {}
+
+    correct_matrix = is_correct.reshape(n_prompts, rollout_n)
+    n_correct_per_prompt = correct_matrix.sum(axis=1).astype(float)
+
+    all_correct_mask = n_correct_per_prompt == rollout_n
+    all_wrong_mask = n_correct_per_prompt == 0
+    effective_mask = ~all_correct_mask & ~all_wrong_mask
+
+    n_effective = int(effective_mask.sum())
+    correct_ratios = n_correct_per_prompt / rollout_n
+
+    metrics: dict[str, Any] = {
+        "effective_data/total_prompts": n_prompts,
+        "effective_data/n_effective": n_effective,
+        "effective_data/n_all_correct": int(all_correct_mask.sum()),
+        "effective_data/n_all_wrong": int(all_wrong_mask.sum()),
+        "effective_data/effective_ratio": float(n_effective / n_prompts),
+    }
+    if n_effective > 0:
+        metrics["effective_data/avg_correct_ratio"] = float(correct_ratios[effective_mask].mean())
+    else:
+        metrics["effective_data/avg_correct_ratio"] = 0.0
+
+    from_hard = _extract_hard_pool_flags(batch, n_prompts, rollout_n)
+    if from_hard is not None:
+        hard_mask = from_hard
+        normal_mask = ~from_hard
+
+        for label, mask in [("hard_grpo", hard_mask), ("normal_grpo", normal_mask)]:
+            n_src = int(mask.sum())
+            if n_src == 0:
+                metrics[f"effective_data/{label}/n_prompts"] = 0
+                metrics[f"effective_data/{label}/n_effective"] = 0
+                metrics[f"effective_data/{label}/effective_ratio"] = 0.0
+                metrics[f"effective_data/{label}/avg_correct_ratio"] = 0.0
+                continue
+
+            src_effective = effective_mask & mask
+            n_src_effective = int(src_effective.sum())
+
+            metrics[f"effective_data/{label}/n_prompts"] = n_src
+            metrics[f"effective_data/{label}/n_effective"] = n_src_effective
+            metrics[f"effective_data/{label}/effective_ratio"] = float(n_src_effective / n_src)
+            if n_src_effective > 0:
+                metrics[f"effective_data/{label}/avg_correct_ratio"] = float(
+                    correct_ratios[src_effective].mean()
+                )
+            else:
+                metrics[f"effective_data/{label}/avg_correct_ratio"] = 0.0
+
+    return metrics
+
+
+def _extract_hard_pool_flags(batch: DataProto, n_prompts: int, rollout_n: int):
+    """Extract per-prompt from_hard_pool flags. Returns None if not available."""
+    non_tensor = batch.non_tensor_batch
+    from_hard_list = []
+
+    if "extra_info" in non_tensor:
+        for item in non_tensor["extra_info"]:
+            if isinstance(item, dict) and "from_hard_pool" in item:
+                from_hard_list.append(bool(item["from_hard_pool"]))
+    if not from_hard_list and "from_hard_pool" in non_tensor:
+        raw = non_tensor["from_hard_pool"]
+        from_hard_list = [bool(v) for v in raw]
+
+    if not from_hard_list:
+        return None
+
+    from_hard_arr = np.array(from_hard_list, dtype=bool)
+    if len(from_hard_arr) == n_prompts * rollout_n:
+        from_hard_arr = from_hard_arr.reshape(n_prompts, rollout_n)[:, 0]
+    elif len(from_hard_arr) != n_prompts:
+        return None
+
+    return from_hard_arr
+
+
 def bootstrap_metric(
     data: list[Any],
     subset_size: int,
